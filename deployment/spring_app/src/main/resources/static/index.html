@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ECG Predictor</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #0f172a;
+            --panel: #111827;
+            --panel-2: #1f2937;
+            --text: #e5e7eb;
+            --muted: #94a3b8;
+            --accent: #38bdf8;
+            --good: #22c55e;
+            --bad: #ef4444;
+            --border: #334155;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: Inter, Arial, sans-serif;
+            background: linear-gradient(180deg, #0b1220 0%, var(--bg) 100%);
+            color: var(--text);
+        }
+
+        .container {
+            width: min(1100px, 92vw);
+            margin: 32px auto;
+        }
+
+        h1 { margin-bottom: 8px; }
+        p { color: var(--muted); }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 24px;
+        }
+
+        .card {
+            background: rgba(17, 24, 39, 0.95);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+        }
+
+        .card h2 { margin-top: 0; }
+
+        textarea, input[type="file"] {
+            width: 100%;
+            margin-top: 10px;
+            margin-bottom: 14px;
+            background: var(--panel-2);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px;
+        }
+
+        textarea {
+            min-height: 220px;
+            resize: vertical;
+            font-family: Consolas, monospace;
+        }
+
+        button {
+            background: var(--accent);
+            border: none;
+            color: #001018;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        button:hover { filter: brightness(1.05); }
+
+        .result {
+            margin-top: 24px;
+        }
+
+        .result.hidden { display: none; }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .pill {
+            display: inline-block;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(56, 189, 248, 0.15);
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            color: var(--accent);
+            font-weight: 700;
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-top: 18px;
+        }
+
+        .metric {
+            background: var(--panel-2);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 14px;
+        }
+
+        .metric .label {
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .metric .value {
+            margin-top: 6px;
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+
+        .probs {
+            margin-top: 18px;
+        }
+
+        .prob-row {
+            margin-bottom: 12px;
+        }
+
+        .prob-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.95rem;
+            margin-bottom: 6px;
+        }
+
+        .bar {
+            width: 100%;
+            height: 10px;
+            background: #0b1220;
+            border-radius: 999px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        .bar > span {
+            display: block;
+            height: 100%;
+            background: linear-gradient(90deg, #38bdf8, #22c55e);
+        }
+
+        .status {
+            margin-top: 14px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: var(--panel-2);
+            color: var(--muted);
+        }
+
+        .status.error {
+            border-color: rgba(239,68,68,0.35);
+            color: #fecaca;
+            background: rgba(127,29,29,0.25);
+        }
+
+        .hint {
+            font-size: 0.92rem;
+            color: var(--muted);
+            margin-top: 8px;
+        }
+
+        @media (max-width: 900px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ECG Predictor</h1>
+        <p>Interface simple pour tester ton modèle ECG déployé. Tu peux coller un signal ou envoyer un fichier.</p>
+
+        <div class="grid">
+            <div class="card">
+                <h2>Prédiction depuis un texte</h2>
+                <p>Colle 96 valeurs séparées par des virgules, espaces ou retours à la ligne.</p>
+                <textarea id="signalText" placeholder="0.1, 0.3, -0.2, ..."></textarea>
+                <button id="predictTextBtn">Prédire depuis le texte</button>
+                <div class="hint">Pratique pour tester rapidement une seule série.</div>
+            </div>
+
+            <div class="card">
+                <h2>Prédiction depuis un fichier</h2>
+                <p>Tu peux envoyer un <code>.txt</code>, <code>.csv</code> ou <code>.tsv</code>.</p>
+                <input id="signalFile" type="file" accept=".txt,.csv,.tsv" />
+                <button id="predictFileBtn">Prédire depuis le fichier</button>
+                <div class="hint">Le backend accepte aussi une ligne de dataset complète (label + 96 valeurs).</div>
+            </div>
+        </div>
+
+        <div id="status" class="status">En attente d'une prédiction.</div>
+
+        <div id="result" class="card result hidden">
+            <div class="result-header">
+                <h2 style="margin:0;">Résultat</h2>
+                <span id="resultPill" class="pill">-</span>
+            </div>
+
+            <div class="metrics">
+                <div class="metric">
+                    <div class="label">Modèle</div>
+                    <div id="modelName" class="value">-</div>
+                </div>
+                <div class="metric">
+                    <div class="label">Classe prédite (id)</div>
+                    <div id="classId" class="value">-</div>
+                </div>
+                <div class="metric">
+                    <div class="label">Label original</div>
+                    <div id="originalLabel" class="value">-</div>
+                </div>
+                <div class="metric">
+                    <div class="label">Longueur attendue</div>
+                    <div id="inputLength" class="value">-</div>
+                </div>
+            </div>
+
+            <div class="probs">
+                <h3>Probabilités</h3>
+                <div id="probabilities"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const statusBox = document.getElementById('status');
+        const resultBox = document.getElementById('result');
+        const resultPill = document.getElementById('resultPill');
+        const modelName = document.getElementById('modelName');
+        const classId = document.getElementById('classId');
+        const originalLabel = document.getElementById('originalLabel');
+        const inputLength = document.getElementById('inputLength');
+        const probabilities = document.getElementById('probabilities');
+
+        function setStatus(message, isError = false) {
+            statusBox.textContent = message;
+            statusBox.className = isError ? 'status error' : 'status';
+        }
+
+        function percent(value) {
+            return (value * 100).toFixed(2) + ' %';
+        }
+
+        function renderResult(payload) {
+            const data = payload.data;
+            resultBox.classList.remove('hidden');
+
+            resultPill.textContent = `Label ${data.predicted_original_label}`;
+            modelName.textContent = data.model_name;
+            classId.textContent = data.predicted_class_id;
+            originalLabel.textContent = data.predicted_original_label;
+            inputLength.textContent = data.input_length;
+
+            probabilities.innerHTML = '';
+            Object.entries(data.probabilities).forEach(([label, value]) => {
+                const row = document.createElement('div');
+                row.className = 'prob-row';
+                row.innerHTML = `
+                    <div class="prob-label">
+                        <span>${label}</span>
+                        <span>${percent(value)}</span>
+                    </div>
+                    <div class="bar"><span style="width:${Math.max(0, Math.min(100, value * 100))}%"></span></div>
+                `;
+                probabilities.appendChild(row);
+            });
+        }
+
+        async function postForm(url, formData) {
+            setStatus('Prédiction en cours...');
+            resultBox.classList.add('hidden');
+
+            const response = await fetch(url, {
+                method: 'POST',
+                body: formData
+            });
+
+            const text = await response.text();
+            let payload;
+            try {
+                payload = JSON.parse(text);
+            } catch {
+                throw new Error(text || 'Réponse invalide du serveur');
+            }
+
+            if (!response.ok || payload.status !== 'ok') {
+                throw new Error(payload.message || 'Erreur inconnue');
+            }
+
+            renderResult(payload);
+            setStatus('Prédiction terminée.');
+        }
+
+        document.getElementById('predictTextBtn').addEventListener('click', async () => {
+            try {
+                const value = document.getElementById('signalText').value;
+                const formData = new FormData();
+                formData.append('signal', value);
+                await postForm('/classify-text', formData);
+            } catch (error) {
+                setStatus(error.message, true);
+            }
+        });
+
+        document.getElementById('predictFileBtn').addEventListener('click', async () => {
+            try {
+                const fileInput = document.getElementById('signalFile');
+                if (!fileInput.files || fileInput.files.length === 0) {
+                    throw new Error('Choisis un fichier avant de lancer la prédiction.');
+                }
+                const formData = new FormData();
+                formData.append('signal_file', fileInput.files[0]);
+                await postForm('/classify-file', formData);
+            } catch (error) {
+                setStatus(error.message, true);
+            }
+        });
+    </script>
+</body>
+</html>

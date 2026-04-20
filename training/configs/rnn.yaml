@@ -1,0 +1,9 @@
+model_name: rnn
+seed: 42
+val_size: 0.2
+epochs: 60
+batch_size: 16
+learning_rate: 0.001
+patience: 10
+units: 32
+dense: 16

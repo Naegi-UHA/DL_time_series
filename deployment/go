@@ -1,0 +1,10 @@
+#!/bin/bash
+docker stop flask_app; docker rm flask_app
+( cd flask_app; docker buildx build --rm -t flask_app . )
+docker stop spring_app; docker rm spring_app
+( cd spring_app; docker buildx build --rm -t spring_app . )
+echo "Beware if you try later with docker compose up"
+echo "Before export this variable using :"
+echo "export MODELS=`cd ..; pwd`"
+export MODELS=`cd ..; pwd`
+docker compose up

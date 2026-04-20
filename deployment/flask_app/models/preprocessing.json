@@ -1,0 +1,8 @@
+{
+  "normalization": "zscore_per_signal",
+  "model_name": "mlp",
+  "input_length": 96,
+  "input_shape": [
+    96
+  ]
+}
