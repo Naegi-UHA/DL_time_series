@@ -1,3 +1,9 @@
+"""Creates a comparison file for the trained models.
+
+Each model saves a summary after training. This script reads those summaries
+and writes one CSV file to compare the main results more easily.
+"""
+
 from __future__ import annotations
 
 import json
@@ -5,7 +11,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from .paths import METRICS_DIR, MODELS_DIR
+from paths import METRICS_DIR, MODELS_DIR
+
+
+def read_json(path: Path) -> dict:
+    with open(path, "r", encoding="utf-8") as file:
+        return json.load(file)
 
 
 def main() -> None:
@@ -13,12 +24,12 @@ def main() -> None:
     rows = []
 
     for summary_path in sorted(MODELS_DIR.glob("*/summary.json")):
-        with open(summary_path, "r", encoding="utf-8") as f:
-            summary = json.load(f)
+        summary = read_json(summary_path)
 
         rows.append(
             {
                 "model": summary["model_name"],
+                "classes": str(summary.get("class_labels", [])),
                 "params": summary["num_parameters"],
                 "train_time_s": summary["train_time_seconds"],
                 "infer_test_s": summary["test_inference_seconds"],
@@ -32,7 +43,7 @@ def main() -> None:
         )
 
     if not rows:
-        raise FileNotFoundError("Aucun modèle entraîné trouvé dans training/outputs/models/")
+        raise FileNotFoundError("Aucun summary.json trouvé dans training/outputs/models/")
 
     df = pd.DataFrame(rows).sort_values(by="test_f1", ascending=False)
     df.to_csv(METRICS_DIR / "comparison.csv", index=False)

@@ -1,3 +1,9 @@
+"""Trains one ECG model from a YAML config.
+
+The script loads the data, prepares labels for the model, trains the network,
+evaluates the best version, and saves the training outputs.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -9,92 +15,59 @@ from pathlib import Path
 import numpy as np
 import tensorflow as tf
 import yaml
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from tensorflow import keras
 
-from .data_utils import load_ecg200, prepare_data
-from .paths import MODELS_DIR, resolve_config_path
+from data_utils import decode_labels, load_ecg200, prepare_data
+from metrics import compute_metrics
+from paths import MODELS_DIR, resolve_config_path
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=True, help="Chemin vers le YAML du modèle")
+    parser.add_argument("--config", required=True, help="Path to the model YAML config")
     return parser.parse_args()
 
 
-def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
-    return {
-        "accuracy": float(accuracy_score(y_true, y_pred)),
-        "precision": float(precision_score(y_true, y_pred, zero_division=0)),
-        "recall": float(recall_score(y_true, y_pred, zero_division=0)),
-        "f1": float(f1_score(y_true, y_pred, zero_division=0)),
-    }
+def read_yaml(path: Path) -> dict:
+    with open(path, "r", encoding="utf-8") as file:
+        return yaml.safe_load(file)
 
 
 def save_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+
+    with open(path, "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2, ensure_ascii=False)
 
 
-def plot_history(history: dict, output_dir: Path) -> None:
-    import matplotlib.pyplot as plt
-
-    fig = plt.figure(figsize=(8, 4))
-    plt.plot(history.get("loss", []), label="train_loss")
-    plt.plot(history.get("val_loss", []), label="val_loss")
-    plt.legend()
-    plt.title("Loss")
-    plt.tight_layout()
-    fig.savefig(output_dir / "loss.png")
-    plt.close(fig)
-
-    fig = plt.figure(figsize=(8, 4))
-    plt.plot(history.get("accuracy", []), label="train_accuracy")
-    plt.plot(history.get("val_accuracy", []), label="val_accuracy")
-    plt.legend()
-    plt.title("Accuracy")
-    plt.tight_layout()
-    fig.savefig(output_dir / "accuracy.png")
-    plt.close(fig)
-
-
-def main() -> None:
-    args = parse_args()
-    config_path = resolve_config_path(args.config)
-
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
-
-    seed = int(config.get("seed", 42))
+def setup_seed(seed: int) -> None:
     np.random.seed(seed)
     tf.random.set_seed(seed)
 
-    model_name = config["model_name"]
-    dataset = load_ecg200()
-    data = prepare_data(
-        dataset=dataset,
-        model_type=model_name,
-        val_size=float(config.get("val_size", 0.2)),
-        seed=seed,
-    )
 
-    model_module = importlib.import_module(f"training.src.models.{model_name}")
-    model = model_module.build_model(data["input_shape"], dataset["num_classes"], config)
+def build_model(
+    model_name: str,
+    input_shape: tuple[int, ...],
+    num_classes: int,
+    config: dict,
+) -> keras.Model:
+    model_file = importlib.import_module(f"training.src.models.{model_name}")
+    return model_file.build_model(input_shape, num_classes, config)
 
+
+def compile_model(model: keras.Model, learning_rate: float) -> None:
     model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=float(config.get("learning_rate", 1e-3))),
+        optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
         loss="sparse_categorical_crossentropy",
         metrics=["accuracy"],
     )
 
-    output_dir = MODELS_DIR / model_name
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    callbacks = [
+def make_callbacks(output_dir: Path, patience: int) -> list[keras.callbacks.Callback]:
+    return [
         keras.callbacks.EarlyStopping(
             monitor="val_loss",
-            patience=int(config.get("patience", 10)),
+            patience=patience,
             restore_best_weights=True,
         ),
         keras.callbacks.ModelCheckpoint(
@@ -104,7 +77,17 @@ def main() -> None:
         ),
     ]
 
-    start = time.perf_counter()
+
+def train_model(
+    model: keras.Model,
+    data: dict,
+    config: dict,
+    output_dir: Path,
+) -> tuple[keras.callbacks.History, float]:
+    callbacks = make_callbacks(output_dir, patience=int(config.get("patience", 10)))
+
+    start_time = time.perf_counter()
+
     history = model.fit(
         data["X_train"],
         data["y_train"],
@@ -114,45 +97,228 @@ def main() -> None:
         verbose=1,
         callbacks=callbacks,
     )
-    train_time = time.perf_counter() - start
 
-    best_model = keras.models.load_model(output_dir / "best_model.keras")
+    train_time = time.perf_counter() - start_time
+    return history, train_time
 
-    val_pred = np.argmax(best_model.predict(data["X_val"], verbose=0), axis=1)
-    test_start = time.perf_counter()
-    test_pred = np.argmax(best_model.predict(data["X_test"], verbose=0), axis=1)
-    inference_time = time.perf_counter() - test_start
 
-    summary = {
+def load_best_model(output_dir: Path) -> keras.Model:
+    return keras.models.load_model(output_dir / "best_model.keras")
+
+
+def predict_original_labels(
+    model: keras.Model,
+    X: np.ndarray,
+    model_id_to_label: dict[int, int],
+) -> np.ndarray:
+    predictions = model.predict(X, verbose=0)
+    model_ids = np.argmax(predictions, axis=1)
+
+    return decode_labels(model_ids, model_id_to_label)
+
+
+def measure_test_predictions(
+    model: keras.Model,
+    X_test: np.ndarray,
+    model_id_to_label: dict[int, int],
+) -> tuple[np.ndarray, float]:
+    start_time = time.perf_counter()
+
+    predictions = predict_original_labels(model, X_test, model_id_to_label)
+
+    test_time = time.perf_counter() - start_time
+    return predictions, test_time
+
+
+def choose_positive_label(class_labels: list[int]) -> int:
+    if 1 in class_labels:
+        return 1
+
+    return class_labels[-1]
+
+
+def make_summary(
+    model_name: str,
+    config_path: Path,
+    model: keras.Model,
+    dataset: dict,
+    data: dict,
+    train_time: float,
+    test_time: float,
+    val_pred: np.ndarray,
+    test_pred: np.ndarray,
+) -> dict:
+    positive_label = choose_positive_label(dataset["class_labels"])
+
+    return {
         "model_name": model_name,
         "config_file": str(config_path),
         "input_shape": list(data["input_shape"]),
-        "num_parameters": int(best_model.count_params()),
-        "train_time_seconds": train_time,
-        "test_inference_seconds": inference_time,
-        "test_inference_per_sample": inference_time / len(data["X_test"]),
-        "validation_metrics": compute_metrics(data["y_val"], val_pred),
-        "test_metrics": compute_metrics(data["y_test"], test_pred),
-        "label_to_id": {str(k): v for k, v in dataset["label_to_id"].items()},
         "input_length": dataset["input_length"],
+        "num_parameters": int(model.count_params()),
+        "train_time_seconds": train_time,
+        "test_inference_seconds": test_time,
+        "test_inference_per_sample": test_time / len(data["X_test"]),
+        "class_labels": dataset["class_labels"],
+        "positive_label": positive_label,
+        "label_to_model_id": {
+            str(label): model_id
+            for label, model_id in dataset["label_to_model_id"].items()
+        },
+        "model_id_to_label": {
+            str(model_id): label
+            for model_id, label in dataset["model_id_to_label"].items()
+        },
+        "validation_metrics": compute_metrics(
+            data["y_val_original"],
+            val_pred,
+            positive_label,
+        ),
+        "test_metrics": compute_metrics(
+            data["y_test_original"],
+            test_pred,
+            positive_label,
+        ),
     }
 
+
+def make_preprocessing_info(
+    model_name: str,
+    dataset: dict,
+    data: dict,
+    summary: dict,
+) -> dict:
+    return {
+        "normalization": "zscore_per_signal",
+        "model_name": model_name,
+        "input_length": dataset["input_length"],
+        "input_shape": list(data["input_shape"]),
+        "class_labels": dataset["class_labels"],
+        "label_to_model_id": summary["label_to_model_id"],
+        "model_id_to_label": summary["model_id_to_label"],
+    }
+
+
+def plot_history(history_data: dict, output_dir: Path) -> None:
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure(figsize=(8, 4))
+    plt.plot(history_data.get("loss", []), label="train_loss")
+    plt.plot(history_data.get("val_loss", []), label="val_loss")
+    plt.legend()
+    plt.title("Loss")
+    plt.tight_layout()
+    fig.savefig(output_dir / "loss.png")
+    plt.close(fig)
+
+    fig = plt.figure(figsize=(8, 4))
+    plt.plot(history_data.get("accuracy", []), label="train_accuracy")
+    plt.plot(history_data.get("val_accuracy", []), label="val_accuracy")
+    plt.legend()
+    plt.title("Accuracy")
+    plt.tight_layout()
+    fig.savefig(output_dir / "accuracy.png")
+    plt.close(fig)
+
+
+def save_model_summary(model: keras.Model, output_dir: Path) -> None:
+    with open(output_dir / "model_summary.txt", "w", encoding="utf-8") as file:
+        model.summary(print_fn=lambda line: file.write(line + "\n"))
+
+
+def save_training_outputs(
+    output_dir: Path,
+    model: keras.Model,
+    summary: dict,
+    history_data: dict,
+    preprocessing: dict,
+) -> None:
     save_json(output_dir / "summary.json", summary)
-    save_json(output_dir / "history.json", history.history)
-    save_json(
-        output_dir / "preprocessing.json",
-        {
-            "normalization": "zscore_per_signal",
-            "model_name": model_name,
-            "input_length": dataset["input_length"],
-            "input_shape": list(data["input_shape"]),
-        },
+    save_json(output_dir / "history.json", history_data)
+    save_json(output_dir / "preprocessing.json", preprocessing)
+
+    plot_history(history_data, output_dir)
+    save_model_summary(model, output_dir)
+
+
+def main() -> None:
+    # Read the YAML config.
+    args = parse_args()
+    config_path = resolve_config_path(args.config)
+    config = read_yaml(config_path)
+
+    # Prepare randomness, paths, dataset and labels.
+    seed = int(config.get("seed", 42))
+    setup_seed(seed)
+
+    model_name = config["model_name"]
+    output_dir = MODELS_DIR / model_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    dataset = load_ecg200()
+    data = prepare_data(
+        dataset=dataset,
+        model_type=model_name,
+        val_size=float(config.get("val_size", 0.2)),
+        seed=seed,
     )
-    plot_history(history.history, output_dir)
 
-    with open(output_dir / "model_summary.txt", "w", encoding="utf-8") as f:
-        best_model.summary(print_fn=lambda line: f.write(line + "\n"))
+    # Create and compile the model.
+    model = build_model(
+        model_name=model_name,
+        input_shape=data["input_shape"],
+        num_classes=dataset["num_classes"],
+        config=config,
+    )
+    compile_model(
+        model=model,
+        learning_rate=float(config.get("learning_rate", 0.001)),
+    )
 
+    # Train the model and reload the best saved version.
+    history, train_time = train_model(model, data, config, output_dir)
+    best_model = load_best_model(output_dir)
+
+    # Predict using the real labels, so results show -1 and 1.
+    val_pred = predict_original_labels(
+        model=best_model,
+        X=data["X_val"],
+        model_id_to_label=dataset["model_id_to_label"],
+    )
+    test_pred, test_time = measure_test_predictions(
+        model=best_model,
+        X_test=data["X_test"],
+        model_id_to_label=dataset["model_id_to_label"],
+    )
+
+    # Save JSON files, plots and model summary.
+    summary = make_summary(
+        model_name=model_name,
+        config_path=config_path,
+        model=best_model,
+        dataset=dataset,
+        data=data,
+        train_time=train_time,
+        test_time=test_time,
+        val_pred=val_pred,
+        test_pred=test_pred,
+    )
+    preprocessing = make_preprocessing_info(
+        model_name=model_name,
+        dataset=dataset,
+        data=data,
+        summary=summary,
+    )
+
+    save_training_outputs(
+        output_dir=output_dir,
+        model=best_model,
+        summary=summary,
+        history_data=history.history,
+        preprocessing=preprocessing,
+    )
+
+    # Print the most important result in the terminal.
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     print(f"\nRésultats enregistrés dans : {output_dir}")
 
