@@ -4,7 +4,7 @@ SRC_DIR = Path(__file__).resolve().parent
 TRAINING_DIR = SRC_DIR.parent
 PROJECT_ROOT = TRAINING_DIR.parent
 
-DATA_RAW_DIR = PROJECT_ROOT / "data" / "raw"
+DATA_RAW_DIR = PROJECT_ROOT / "data"
 CONFIGS_DIR = TRAINING_DIR / "configs"
 OUTPUTS_DIR = TRAINING_DIR / "outputs"
 FIGURES_DIR = OUTPUTS_DIR / "figures"
