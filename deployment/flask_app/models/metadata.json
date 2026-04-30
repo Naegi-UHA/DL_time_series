@@ -1,4 +1,9 @@
 {
   "selected_model": "mlp",
-  "task": "ecg_binary_classification"
+  "task": "ecg_binary_classification",
+  "class_labels": [
+    -1,
+    1
+  ],
+  "label_map_direction": "model_id_to_original_label"
 }

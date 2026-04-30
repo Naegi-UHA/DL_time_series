@@ -4,5 +4,17 @@
   "input_length": 96,
   "input_shape": [
     96
-  ]
+  ],
+  "class_labels": [
+    -1,
+    1
+  ],
+  "label_to_model_id": {
+    "-1": 0,
+    "1": 1
+  },
+  "model_id_to_label": {
+    "0": -1,
+    "1": 1
+  }
 }

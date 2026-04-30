@@ -17,9 +17,9 @@ import tensorflow as tf
 import yaml
 from tensorflow import keras
 
-from data_utils import decode_labels, load_ecg200, prepare_data
-from metrics import compute_metrics
-from paths import MODELS_DIR, resolve_config_path
+from .data_utils import decode_labels, load_ecg200, prepare_data
+from .metrics import compute_metrics
+from .paths import MODELS_DIR, resolve_config_path
 
 
 def parse_args() -> argparse.Namespace:
@@ -41,6 +41,7 @@ def save_json(path: Path, data: dict) -> None:
 
 
 def setup_seed(seed: int) -> None:
+    # Use the same random seed each time, so results are easier to compare.
     np.random.seed(seed)
     tf.random.set_seed(seed)
 
@@ -51,11 +52,13 @@ def build_model(
     num_classes: int,
     config: dict,
 ) -> keras.Model:
+    # Load the selected model file from training/src/models/.
     model_file = importlib.import_module(f"training.src.models.{model_name}")
     return model_file.build_model(input_shape, num_classes, config)
 
 
 def compile_model(model: keras.Model, learning_rate: float) -> None:
+    # The model uses labels 0 and 1 internally.
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
         loss="sparse_categorical_crossentropy",
@@ -64,6 +67,8 @@ def compile_model(model: keras.Model, learning_rate: float) -> None:
 
 
 def make_callbacks(output_dir: Path, patience: int) -> list[keras.callbacks.Callback]:
+    # EarlyStopping stops training when validation loss stops improving.
+    # ModelCheckpoint keeps only the best model.
     return [
         keras.callbacks.EarlyStopping(
             monitor="val_loss",
@@ -111,6 +116,8 @@ def predict_original_labels(
     X: np.ndarray,
     model_id_to_label: dict[int, int],
 ) -> np.ndarray:
+    # The model predicts 0 or 1.
+    # This converts predictions back to the real ECG labels: -1 or 1.
     predictions = model.predict(X, verbose=0)
     model_ids = np.argmax(predictions, axis=1)
 
@@ -131,6 +138,7 @@ def measure_test_predictions(
 
 
 def choose_positive_label(class_labels: list[int]) -> int:
+    # In ECG200, the positive class is 1.
     if 1 in class_labels:
         return 1
 
@@ -241,6 +249,96 @@ def save_training_outputs(
     save_model_summary(model, output_dir)
 
 
+def format_seconds(value: float) -> str:
+    if value < 1:
+        return f"{value * 1000:.2f} ms"
+
+    return f"{value:.2f} s"
+
+
+def format_metric(value: float) -> str:
+    return f"{value * 100:.2f} %"
+
+
+def make_table(headers: list[str], rows: list[list[str]]) -> str:
+    columns = list(zip(headers, *rows))
+    widths = [max(len(str(value)) for value in column) for column in columns]
+
+    separator = "+-" + "-+-".join("-" * width for width in widths) + "-+"
+
+    header_line = "| " + " | ".join(
+        header.ljust(width)
+        for header, width in zip(headers, widths)
+    ) + " |"
+
+    row_lines = []
+    for row in rows:
+        row_lines.append(
+            "| " + " | ".join(
+                str(value).ljust(width)
+                for value, width in zip(row, widths)
+            ) + " |"
+        )
+
+    return "\n".join([separator, header_line, separator, *row_lines, separator])
+
+
+def print_title(title: str) -> None:
+    line = "=" * len(title)
+    print()
+    print(line)
+    print(title)
+    print(line)
+
+
+def print_training_report(summary: dict, output_dir: Path) -> None:
+    validation = summary["validation_metrics"]
+    test = summary["test_metrics"]
+
+    print_title(f"Training finished: {summary['model_name']}")
+
+    general_rows = [
+        ["Model", summary["model_name"]],
+        ["Input shape", str(summary["input_shape"])],
+        ["Classes", str(summary["class_labels"])],
+        ["Positive label", str(summary["positive_label"])],
+        ["Parameters", f"{summary['num_parameters']:,}".replace(",", " ")],
+        ["Training time", format_seconds(summary["train_time_seconds"])],
+        ["Test inference", format_seconds(summary["test_inference_seconds"])],
+        [
+            "Inference / sample",
+            format_seconds(summary["test_inference_per_sample"]),
+        ],
+    ]
+
+    print()
+    print("Model info")
+    print(make_table(["Item", "Value"], general_rows))
+
+    metric_rows = [
+        [
+            "Validation",
+            format_metric(validation["accuracy"]),
+            format_metric(validation["precision"]),
+            format_metric(validation["recall"]),
+            format_metric(validation["f1"]),
+        ],
+        [
+            "Test",
+            format_metric(test["accuracy"]),
+            format_metric(test["precision"]),
+            format_metric(test["recall"]),
+            format_metric(test["f1"]),
+        ],
+    ]
+
+    print()
+    print("Metrics")
+    print(make_table(
+        ["Dataset", "Accuracy", "Precision", "Recall", "F1-score"],
+        metric_rows,
+    ))
+
 def main() -> None:
     # Read the YAML config.
     args = parse_args()
@@ -318,9 +416,8 @@ def main() -> None:
         preprocessing=preprocessing,
     )
 
-    # Print the most important result in the terminal.
-    print(json.dumps(summary, indent=2, ensure_ascii=False))
-    print(f"\nRésultats enregistrés dans : {output_dir}")
+    # Print a readable terminal report instead of the full JSON.
+    print_training_report(summary, output_dir)
 
 
 if __name__ == "__main__":

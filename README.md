@@ -183,7 +183,7 @@ Une fois le meilleur modèle choisi, il faut l’exporter pour l’application d
 Exemple avec le modèle CNN :
 
 ```bash
-python -m training.src.export_model --model cnn
+python -m training.src.export_model --model <nom_du_model>
 ```
 
 L’export crée ou copie les fichiers suivants :

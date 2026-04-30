@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from paths import DATA_DIR
+from .paths import DATA_DIR
 
 
 def load_tsv(path: Path) -> tuple[np.ndarray, np.ndarray]:

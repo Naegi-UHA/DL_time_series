@@ -11,7 +11,7 @@ import json
 import shutil
 from pathlib import Path
 
-from paths import DEPLOYMENT_MODELS_DIR, MODELS_DIR
+from .paths import DEPLOYMENT_MODELS_DIR, MODELS_DIR
 
 
 FILES_TO_COPY = [

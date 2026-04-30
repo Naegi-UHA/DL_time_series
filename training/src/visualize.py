@@ -10,8 +10,8 @@ from collections import Counter
 
 import matplotlib.pyplot as plt
 
-from data_utils import load_ecg200
-from paths import FIGURES_DIR
+from .data_utils import load_ecg200
+from .paths import FIGURES_DIR
 
 
 def main() -> None:
