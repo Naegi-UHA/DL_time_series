@@ -1,12 +1,13 @@
 model_name: cnn
 seed: 42
 val_size: 0.2
-epochs: 60
+epochs: 100
 batch_size: 16
-learning_rate: 0.001
+learning_rate: 0.01
 patience: 10
 filters_1: 16
 filters_2: 32
 kernel_1: 5
 kernel_2: 3
 dense: 32
+dropout_rate: 0.3
