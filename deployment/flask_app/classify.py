@@ -43,8 +43,17 @@ def load_artifacts():
 
     if LABEL_MAP_PATH.exists():
         with open(LABEL_MAP_PATH, "r", encoding="utf-8") as f:
-            label_to_id = json.load(f)
-        id_to_label = {int(v): k for k, v in label_to_id.items()}
+            raw_label_map = json.load(f)
+
+        id_to_label = {
+            int(model_id): int(real_label)
+            for model_id, real_label in raw_label_map.items()
+        }
+
+        label_to_id = {
+            real_label: model_id
+            for model_id, real_label in id_to_label.items()
+        }
     else:
         label_to_id = {}
         id_to_label = {}
@@ -152,18 +161,23 @@ def classify_signal(signal: np.ndarray) -> dict:
 
     batch = preprocess_signal(signal)
     probabilities = model.predict(batch, verbose=0)[0]
-    predicted_id = int(np.argmax(probabilities))
-    predicted_original_label = id_to_label.get(predicted_id, str(predicted_id))
 
-    probs_by_class = {
-        id_to_label.get(i, str(i)): float(probabilities[i])
+    predicted_id = int(np.argmax(probabilities))
+    predicted_label = id_to_label.get(predicted_id, predicted_id)
+
+    probabilities_by_class = {
+        str(id_to_label.get(i, i)): float(probabilities[i])
         for i in range(len(probabilities))
     }
 
     return {
+        "predicted_class": predicted_label,
+        "predicted_original_label": predicted_label,
         "predicted_class_id": predicted_id,
-        "predicted_original_label": predicted_original_label,
-        "probabilities": probs_by_class,
+        "probabilities": probabilities_by_class,
         "input_length": expected_length(),
-        "model_name": preprocessing.get("model_name", metadata.get("selected_model", "unknown")),
+        "model_name": preprocessing.get(
+            "model_name",
+            metadata.get("selected_model", "unknown"),
+        ),
     }
