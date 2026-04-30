@@ -17,16 +17,23 @@ label_to_id = {}
 id_to_label = {}
 metadata = {}
 
-
 def patch_keras_loading_compatibility():
     original_layer_init = tf.keras.layers.Layer.__init__
+    original_batchnorm_init = tf.keras.layers.BatchNormalization.__init__
 
     def patched_layer_init(self, *args, **kwargs):
         kwargs.pop("quantization_config", None)
         return original_layer_init(self, *args, **kwargs)
 
-    tf.keras.layers.Layer.__init__ = patched_layer_init
+    def patched_batchnorm_init(self, *args, **kwargs):
+        kwargs.pop("renorm", None)
+        kwargs.pop("renorm_clipping", None)
+        kwargs.pop("renorm_momentum", None)
+        kwargs.pop("quantization_config", None)
+        return original_batchnorm_init(self, *args, **kwargs)
 
+    tf.keras.layers.Layer.__init__ = patched_layer_init
+    tf.keras.layers.BatchNormalization.__init__ = patched_batchnorm_init
 
 def load_artifacts():
     global model, preprocessing, label_to_id, id_to_label, metadata
