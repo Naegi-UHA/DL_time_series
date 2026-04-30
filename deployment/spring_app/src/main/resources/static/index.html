@@ -200,12 +200,12 @@
         .prediction strong {
             display: block;
             margin-top: 2px;
-            font-size: 1.2rem;
+            font-size: 1.35rem;
         }
 
         .summary-grid {
             display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 0;
             margin-bottom: 18px;
             border: 1px solid var(--line);
@@ -279,16 +279,16 @@
             }
 
             .summary-grid {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
+                grid-template-columns: 1fr;
             }
 
-            .summary-item:nth-child(2) {
+            .summary-item {
                 border-right: none;
+                border-bottom: 1px solid var(--line);
             }
 
-            .summary-item:nth-child(1),
-            .summary-item:nth-child(2) {
-                border-bottom: 1px solid var(--line);
+            .summary-item:last-child {
+                border-bottom: none;
             }
         }
     </style>
@@ -342,6 +342,7 @@
                     <h2>Résultat</h2>
                     <p>Réponse retournée par le modèle chargé dans le service Flask.</p>
                 </div>
+
                 <div class="prediction">
                     <span>Label prédit</span>
                     <strong id="resultLabel">-</strong>
@@ -355,18 +356,8 @@
                 </div>
 
                 <div class="summary-item">
-                    <span class="summary-label">Classe prédite</span>
-                    <span class="summary-value" id="classId">-</span>
-                </div>
-
-                <div class="summary-item">
-                    <span class="summary-label">Label original</span>
-                    <span class="summary-value" id="originalLabel">-</span>
-                </div>
-
-                <div class="summary-item">
-                    <span class="summary-label">Longueur attendue</span>
-                    <span class="summary-value" id="inputLength">-</span>
+                    <span class="summary-label">Confiance</span>
+                    <span class="summary-value" id="confidenceValue">-</span>
                 </div>
             </div>
 
@@ -380,9 +371,7 @@
         const resultBox = document.getElementById('result');
         const resultLabel = document.getElementById('resultLabel');
         const modelName = document.getElementById('modelName');
-        const classId = document.getElementById('classId');
-        const originalLabel = document.getElementById('originalLabel');
-        const inputLength = document.getElementById('inputLength');
+        const confidenceValue = document.getElementById('confidenceValue');
         const probabilities = document.getElementById('probabilities');
         const textButton = document.getElementById('predictTextBtn');
         const fileButton = document.getElementById('predictFileBtn');
@@ -403,29 +392,38 @@
 
         function renderResult(payload) {
             const data = payload.data;
+            const predictedClass = data.predicted_class ?? data.predicted_original_label;
+            const probabilityEntries = Object.entries(data.probabilities || {});
+
+            const bestProbability = probabilityEntries.length > 0
+                ? Math.max(...probabilityEntries.map(([, value]) => value))
+                : null;
+
             resultBox.classList.remove('hidden');
 
-            resultLabel.textContent = data.predicted_original_label;
-            modelName.textContent = data.model_name;
-            classId.textContent = data.predicted_class_id;
-            originalLabel.textContent = data.predicted_original_label;
-            inputLength.textContent = data.input_length;
+            resultLabel.textContent = predictedClass;
+            modelName.textContent = data.model_name || '-';
+            confidenceValue.textContent = bestProbability === null ? '-' : percent(bestProbability);
 
             probabilities.innerHTML = '';
-            Object.entries(data.probabilities || {}).forEach(([label, value]) => {
-                const row = document.createElement('div');
-                const width = Math.max(0, Math.min(100, value * 100));
 
-                row.className = 'prob-row';
-                row.innerHTML = `
-                    <div class="prob-label">
-                        <span>${label}</span>
-                        <span>${percent(value)}</span>
-                    </div>
-                    <div class="bar"><span style="width:${width}%"></span></div>
-                `;
-                probabilities.appendChild(row);
-            });
+            probabilityEntries
+                .sort((a, b) => b[1] - a[1])
+                .forEach(([label, value]) => {
+                    const row = document.createElement('div');
+                    const width = Math.max(0, Math.min(100, value * 100));
+
+                    row.className = 'prob-row';
+                    row.innerHTML = `
+                        <div class="prob-label">
+                            <span>${label}</span>
+                            <span>${percent(value)}</span>
+                        </div>
+                        <div class="bar"><span style="width:${width}%"></span></div>
+                    `;
+
+                    probabilities.appendChild(row);
+                });
         }
 
         async function postForm(url, formData) {
@@ -463,7 +461,9 @@
             try {
                 const value = document.getElementById('signalText').value;
                 const formData = new FormData();
+
                 formData.append('signal', value);
+
                 await postForm('/classify-text', formData);
             } catch (error) {
                 setStatus(error.message, true);
@@ -473,11 +473,15 @@
         fileButton.addEventListener('click', async () => {
             try {
                 const fileInput = document.getElementById('signalFile');
+
                 if (!fileInput.files || fileInput.files.length === 0) {
                     throw new Error('Choisis un fichier avant de lancer la prédiction.');
                 }
+
                 const formData = new FormData();
+
                 formData.append('signal_file', fileInput.files[0]);
+
                 await postForm('/classify-file', formData);
             } catch (error) {
                 setStatus(error.message, true);
