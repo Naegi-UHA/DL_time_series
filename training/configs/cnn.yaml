@@ -11,3 +11,4 @@ kernel_1: 5
 kernel_2: 3
 dense: 32
 dropout_rate: 0.3
+deterministic: true

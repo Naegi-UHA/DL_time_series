@@ -10,3 +10,4 @@ hidden_2: 32
 "hidden_3": 16
 dropout_1: 0.3
 dropout_2: 0.3
+deterministic: true
